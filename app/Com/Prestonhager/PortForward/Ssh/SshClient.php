@@ -57,8 +57,8 @@ class SshClient
         }
 
         $base[] = $useAlias ? $connectHost : sprintf('%s@%s', $connectUser, $connectHost);
-        // Pass script via stdin to ensure LF-only line endings
-        $base[] = 'bash -s';
+        // Cisco IOS exec sessions take commands from stdin; do NOT pass a remote
+        // command (ssh host "cmd" - Cisco rejects it with "Line has invalid autocommand").
 
         $process = new Process($base, timeout: 60, input: $remoteScript);
         $process->run();
