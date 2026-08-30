@@ -32,13 +32,14 @@ class SshClient
             throw new PluginException('Router SSH private key is not configured.');
         }
 
-        $remoteScript = implode("\n", $commands);
+        // Use LF-only line endings for Cisco IOS compatibility
+        $remoteScript = implode("\n", $commands) . "\n";
         $sshConfig = $this->config->sshConfigPath();
         $connectHost = $this->config->sshConnectHost();
         $connectUser = $this->config->routerSshUser();
         $useAlias = $connectHost !== $this->config->routerHost();
 
-        $base = ['ssh', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=accept-new'];
+        $base = ['ssh', '-T', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=accept-new'];
 
         if ($sshConfig !== '') {
             $base[] = '-F';
@@ -56,9 +57,10 @@ class SshClient
         }
 
         $base[] = $useAlias ? $connectHost : sprintf('%s@%s', $connectUser, $connectHost);
-        $base[] = $remoteScript;
+        // Pass script via stdin to ensure LF-only line endings
+        $base[] = 'bash -s';
 
-        $process = new Process($base, timeout: 60);
+        $process = new Process($base, timeout: 60, input: $remoteScript);
         $process->run();
 
         return [
