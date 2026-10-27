@@ -88,11 +88,12 @@ class RouterNatService
             'created_at' => now()->toIso8601String(),
         ];
         $this->state->add($serverId, $mapping);
+        $this->saveConfig($serverId);
 
         return $mapping;
     }
 
-    public function removeMapping(int $serverId, string $mappingId): void
+    public function removeMapping(int $serverId, string $mappingId, bool $save = true): void
     {
         $existing = $this->state->remove($serverId, $mappingId);
         if (is_null($existing)) {
@@ -127,17 +128,54 @@ class RouterNatService
         if (!$success) {
             throw new PluginException('Failed to remove NAT rule on router.');
         }
+
+        if ($save) {
+            $this->saveConfig($serverId);
+        }
     }
 
     public function removeAllForServer(int $serverId): void
     {
+        $removed = false;
         foreach ($this->state->all($serverId) as $mapping) {
             try {
-                $this->removeMapping($serverId, (string) $mapping['id']);
+                $this->removeMapping($serverId, (string) $mapping['id'], save: false);
+                $removed = true;
             } catch (PluginException) {
             }
         }
         $this->state->clear($serverId);
+
+        if ($removed) {
+            $this->saveConfig($serverId);
+        }
+    }
+
+    /**
+     * Copy the running-config to NVRAM so NAT changes survive a router reload.
+     * Runs in its own SSH session, only after the change itself succeeded.
+     */
+    private function saveConfig(int $serverId): void
+    {
+        if ($this->config->dryRun()) {
+            return;
+        }
+
+        $commands = ['write memory'];
+        $result = $this->ssh->exec($commands);
+        $success = $result['exitCode'] === 0 && str_contains($result['stdout'], '[OK]');
+        $this->audit->log(
+            'save',
+            $commands,
+            $success,
+            $result['stdout'],
+            $success ? null : ($result['stderr'] ?: 'write memory did not report [OK]'),
+            $serverId,
+        );
+
+        if (!$success) {
+            throw new PluginException('NAT change is live on the router but saving the config failed (write memory); it will be lost on a router reload.');
+        }
     }
 
     /**
